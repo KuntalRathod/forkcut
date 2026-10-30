@@ -1,0 +1,273 @@
+import { expect, test, describe } from "bun:test";
+import { emptyEdl, type Edl } from "../src/lib/edl/types";
+import { dropSlot, duration, isCropped, outputSize, placed, resolve } from "../src/lib/edl/query";
+import {
+  addText, deleteClip, insertClip, moveClip, resetCrop, rippleDelete,
+  rippleDeleteMany, setCrop, setCropAspect, setSpeed, splitAt, trimTimeline,
+} from "../src/lib/edl/ops";
+
+/** One 60s clip of "interview.mp4". */
+const base = (): Edl => insertClip(emptyEdl(30, 1920, 1080), { src: "m1", in: 0, out: 60 });
+
+describe("placement", () => {
+  test("contiguous prefix sum", () => {
+    let e = base();
+    e = insertClip(e, { src: "m1", in: 100, out: 110 });
+    const p = placed(e);
+    expect(p.map((x) => [x.start, x.end])).toEqual([[0, 60], [60, 70]]);
+    expect(duration(e)).toBe(70);
+  });
+
+  test("speed compresses timeline duration", () => {
+    const b = base();
+    const e = setSpeed(b, b.clips[0].id, 2);
+    expect(duration(e)).toBe(30);
+    expect(resolve(e, 10)!.sourceTime).toBe(20);
+  });
+});
+
+describe("rippleDelete", () => {
+  test("interior cut splits and closes the gap", () => {
+    const e = rippleDelete(base(), 10, 20);
+    expect(duration(e)).toBe(50);
+    expect(e.clips.length).toBe(2);
+    expect(resolve(e, 9)!.sourceTime).toBe(9);
+    expect(resolve(e, 10)!.sourceTime).toBe(20); // 10..20 is gone
+  });
+
+  test("head cut", () => {
+    const e = rippleDelete(base(), 0, 5);
+    expect(duration(e)).toBe(55);
+    expect(resolve(e, 0)!.sourceTime).toBe(5);
+  });
+
+  test("tail cut", () => {
+    const e = rippleDelete(base(), 55, 999);
+    expect(duration(e)).toBe(55);
+  });
+
+  test("swallows whole clips and spans boundaries", () => {
+    let e = base();
+    e = insertClip(e, { src: "m2", in: 0, out: 10 });
+    e = insertClip(e, { src: "m3", in: 0, out: 10 }); // 0-60, 60-70, 70-80
+    e = rippleDelete(e, 55, 75);
+    expect(duration(e)).toBe(60);
+    expect(e.clips.map((c) => c.src)).toEqual(["m1", "m3"]);
+    expect(e.clips[1].in).toBe(5);
+  });
+
+  test("empty and inverted ranges are no-ops", () => {
+    const e = base();
+    expect(rippleDelete(e, 10, 10)).toEqual(e);
+    expect(rippleDelete(e, 20, 10)).toEqual(e);
+  });
+
+  test("clip ids stay unique after a split", () => {
+    const e = rippleDelete(base(), 10, 20);
+    expect(new Set(e.clips.map((c) => c.id)).size).toBe(e.clips.length);
+  });
+});
+
+describe("rippleDeleteMany", () => {
+  test("removes every range measured against the original timeline", () => {
+    // Three 5s silences. Order given deliberately unsorted.
+    const e = rippleDeleteMany(base(), [[30, 35], [5, 10], [50, 55]]);
+    expect(duration(e)).toBe(45);
+    // Everything that survived must be reachable and never land in a hole.
+    for (const hole of [[5, 10], [30, 35], [50, 55]]) {
+      const src = placed(e).flatMap((p) =>
+        [p.start, p.end - 1 / 30].map((t) => resolve(e, t)?.sourceTime ?? -1),
+      );
+      expect(src.some((s) => s >= hole[0] && s < hole[1])).toBe(false);
+    }
+  });
+
+  test("overlapping ranges do not over-delete", () => {
+    const e = rippleDeleteMany(base(), [[10, 20], [15, 25]]);
+    expect(duration(e)).toBe(45); // 10..25 removed once
+  });
+});
+
+describe("text overlays follow the cut", () => {
+  test("overlay after a cut shifts back", () => {
+    let e = addText(base(), { at: 40, dur: 3, content: "hi", style: "caption" });
+    e = rippleDelete(e, 10, 20);
+    expect(e.text[0].at).toBe(30);
+    expect(e.text[0].dur).toBe(3);
+  });
+
+  test("overlay before a cut is untouched", () => {
+    let e = addText(base(), { at: 2, dur: 3, content: "hi", style: "caption" });
+    e = rippleDelete(e, 10, 20);
+    expect(e.text[0].at).toBe(2);
+  });
+
+  test("overlay straddling a cut is shortened, not moved", () => {
+    let e = addText(base(), { at: 8, dur: 8, content: "hi", style: "caption" }); // 8..16
+    e = rippleDelete(e, 10, 20);
+    expect(e.text[0].at).toBe(8);
+    expect(e.text[0].dur).toBe(2); // only 8..10 survives
+  });
+
+  test("overlay entirely inside a cut is dropped", () => {
+    let e = addText(base(), { at: 12, dur: 3, content: "hi", style: "caption" });
+    e = rippleDelete(e, 10, 20);
+    expect(e.text.length).toBe(0);
+  });
+});
+
+describe("other ops", () => {
+  test("splitAt is lossless", () => {
+    const e = splitAt(base(), 25);
+    expect(e.clips.length).toBe(2);
+    expect(duration(e)).toBe(60);
+  });
+
+  test("splitAt on a boundary does nothing", () => {
+    expect(splitAt(base(), 0).clips.length).toBe(1);
+    expect(splitAt(base(), 60).clips.length).toBe(1);
+  });
+
+  test("deleteClip removes exactly that clip", () => {
+    let e = base();
+    e = insertClip(e, { src: "m2", in: 0, out: 10 });
+    e = deleteClip(e, e.clips[0].id);
+    expect(e.clips.map((c) => c.src)).toEqual(["m2"]);
+    expect(duration(e)).toBe(10);
+  });
+
+  test("moveClip reorders", () => {
+    let e = base();
+    e = insertClip(e, { src: "m2", in: 0, out: 10 });
+    e = moveClip(e, e.clips[1].id, 0);
+    expect(e.clips.map((c) => c.src)).toEqual(["m2", "m1"]);
+  });
+
+  /**
+   * Where a carried clip lands. The track has no free positions, so a drag can
+   * only answer "which slot", and the answer is read off the layout of the
+   * clips that are staying put.
+   */
+  describe("dropSlot", () => {
+    /** Three clips: a 10s, b 20s, c 30s. */
+    const three = (): Edl => {
+      let e = insertClip(emptyEdl(30, 1920, 1080), { src: "a", in: 0, out: 10 });
+      e = insertClip(e, { src: "b", in: 0, out: 20 });
+      e = insertClip(e, { src: "c", in: 0, out: 30 });
+      return e;
+    };
+
+    test("dropping before everything lands first", () => {
+      const e = three();
+      expect(dropSlot(e, e.clips[2].id, 0)).toBe(0);
+    });
+
+    test("a clip stays put over its own slot", () => {
+      const e = three();
+      // Carrying b: the others are a (0-10) and c (10-40). Its home centre is
+      // the midpoint of a's end and c's start.
+      expect(dropSlot(e, e.clips[1].id, 10)).toBe(1);
+    });
+
+    test("crossing a neighbour's midpoint changes the slot", () => {
+      const e = three();
+      // Others without c are a (0-10) and b (10-30). b's midpoint is 20.
+      expect(dropSlot(e, e.clips[2].id, 19.9)).toBe(1);
+      expect(dropSlot(e, e.clips[2].id, 20.1)).toBe(2);
+    });
+
+    test("dropping past the end lands last", () => {
+      const e = three();
+      expect(dropSlot(e, e.clips[0].id, 999)).toBe(2);
+    });
+
+    test("the answer never exceeds the number of other clips", () => {
+      const e = three();
+      for (const t of [-5, 0, 7, 12, 31, 500]) {
+        const slot = dropSlot(e, e.clips[1].id, t);
+        expect(slot).toBeGreaterThanOrEqual(0);
+        expect(slot).toBeLessThanOrEqual(2);
+      }
+    });
+
+    test("moving to the slot it reports is a no-op at home", () => {
+      const e = three();
+      const id = e.clips[1].id;
+      const moved = moveClip(e, id, dropSlot(e, id, 10));
+      expect(moved.clips.map((c) => c.src)).toEqual(["a", "b", "c"]);
+    });
+  });
+
+  test("trimTimeline keeps the requested window", () => {
+    const e = trimTimeline(base(), 10, 40);
+    expect(duration(e)).toBe(30);
+    expect(resolve(e, 0)!.sourceTime).toBe(10);
+  });
+
+  test("frame snapping keeps output deterministic", () => {
+    const a = rippleDelete(base(), 10.0031, 20.0007);
+    const b = rippleDelete(base(), 10.0029, 20.0011);
+    const shape = (e: Edl) => JSON.stringify(e, (k, v) => (k === "id" ? undefined : v));
+    expect(shape(a)).toBe(shape(b));
+  });
+});
+
+describe("crop", () => {
+  test("absent by default, and reset removes it entirely", () => {
+    const e = base();
+    expect(e.crop).toBeUndefined();
+    expect(isCropped(e)).toBe(false);
+    expect(resetCrop(setCrop(e, { x: 0.1, y: 0.1, w: 0.5, h: 0.5 })).crop).toBeUndefined();
+  });
+
+  test("a full-frame crop normalises back to no crop", () => {
+    const e = setCrop(base(), { x: 0, y: 0, w: 1, h: 1 });
+    expect(e.crop).toBeUndefined();
+    expect(isCropped(e)).toBe(false);
+  });
+
+  test("clamps so the rectangle can never leave the frame", () => {
+    const e = setCrop(base(), { x: 0.9, y: 0.9, w: 0.5, h: 0.5 });
+    expect(e.crop!.x).toBeCloseTo(0.5, 3);
+    expect(e.crop!.y).toBeCloseTo(0.5, 3);
+    expect(e.crop!.x + e.crop!.w).toBeLessThanOrEqual(1.0001);
+    expect(e.crop!.y + e.crop!.h).toBeLessThanOrEqual(1.0001);
+  });
+
+  test("refuses a degenerate crop", () => {
+    const e = setCrop(base(), { w: 0, h: 0 });
+    expect(e.crop!.w).toBeGreaterThanOrEqual(0.05);
+    expect(e.crop!.h).toBeGreaterThanOrEqual(0.05);
+  });
+
+  test("aspect presets centre the largest fitting rectangle", () => {
+    const wide = base(); // 1920x1080
+    const portrait = setCropAspect(wide, 9 / 16);
+    const out = outputSize(portrait);
+    expect(out.width / out.height).toBeCloseTo(9 / 16, 2);
+    expect(portrait.crop!.x).toBeCloseTo((1 - portrait.crop!.w) / 2, 4);
+    expect(portrait.crop!.h).toBe(1); // full height used
+
+    const square = setCropAspect(wide, 1);
+    const sq = outputSize(square);
+    expect(sq.width).toBe(sq.height);
+  });
+
+  test("a preset matching the frame is not a crop at all", () => {
+    expect(setCropAspect(base(), 16 / 9).crop).toBeUndefined();
+    expect(setCropAspect(base(), null).crop).toBeUndefined();
+  });
+
+  test("output size is even, so the result stays encodable", () => {
+    const e = setCropAspect(base(), 9 / 16);
+    const { width, height } = outputSize(e);
+    expect(width % 2).toBe(0);
+    expect(height % 2).toBe(0);
+  });
+
+  test("crop survives edits to the timeline", () => {
+    const e = rippleDelete(setCropAspect(base(), 1), 10, 20);
+    expect(e.crop).toBeDefined();
+    expect(duration(e)).toBe(50);
+  });
+});

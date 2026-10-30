@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 24 24" role="img" aria-label="Forkcut">
+  <!-- A fork in the film: one strip splits into two frames, the second take in leader orange. -->
+  <rect width="24" height="24" rx="5" fill="#14100d"/>
+  <rect x="0.5" y="0.5" width="23" height="23" rx="4.5" fill="none" stroke="#3a3027"/>
+  <rect x="4.4" y="4.4" width="6" height="7" rx="1.4" fill="none" stroke="#f1e9dc" stroke-width="1.4"/>
+  <rect x="13.6" y="4.4" width="6" height="7" rx="1.4" fill="#f2802e"/>
+  <path d="M7.4 11.6v.4c0 2.2 4.6 1.7 4.6 4.3v3.7M16.6 11.6v.4c0 2.2-4.6 1.7-4.6 4.3" fill="none" stroke="#f1e9dc" stroke-width="1.4" stroke-linecap="round"/>
+</svg>

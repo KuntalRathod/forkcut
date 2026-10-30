@@ -1,0 +1,140 @@
+@import "tailwindcss";
+
+/* --------------------------------------------------------------------------
+   Forkcut design tokens
+
+   Grounded in the film lab, not in dark-SaaS convention. The mat stays
+   genuinely neutral (equal R/G/B) because anything tinted contaminates the
+   footage you are judging next to it.
+   -------------------------------------------------------------------------- */
+@theme {
+  /* Chrome. A warm darkroom ramp: charcoal with a brown cast, like a safelit lab. */
+  --color-shell:   #14100d;  /* app background, deepest */
+  --color-panel:   #1c1713;  /* panels and rails */
+  --color-raised:  #262019;  /* inputs, hovered rows */
+  --color-edge:    #3a3027;  /* borders that need to be seen */
+
+  /* The mat behind the image. Mid-grey on purpose: a black surround makes
+     footage read brighter than it is. This is the one surface that is not
+     part of the chrome ramp. */
+  --color-mat:     #303030;
+
+  /* Ink */
+  --color-ink:     #f1e9dc;
+  --color-ink-2:   #b3a898;
+  --color-ink-3:   #9a8f80;
+
+  /* Two accents, each with a fixed meaning.
+     leader — the agent, and the primary action.
+     grease — cuts and destruction, after the china markers editors mark
+              film with. Never used for emphasis. */
+  --color-leader:  #f2802e;
+  --color-leader-hi: #ff9a4f;
+  --color-grease:  #dc3b3b;
+
+  --font-sans: var(--font-archivo), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+
+  /* Softened throughout. Radius still encodes scale — the larger the
+     surface, the larger the curve — but nothing is hard-cornered now. */
+  --radius-sm: 7px;     /* clips, keycaps, segment buttons */
+  --radius-ctl: 10px;   /* buttons, inputs, menus */
+  --radius-gate: 14px;  /* the image, the track */
+  --radius-panel: 16px; /* panels and the drop target */
+}
+
+@layer base {
+  html, body { height: 100%; }
+  body {
+    background: var(--color-shell);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  /* Timecode must never reflow as digits change. */
+  .tnum { font-variant-numeric: tabular-nums; }
+
+  /* Browser surfaces belong to the design too: the caret, the selection,
+     the focus ring and the scrollbar all ship with defaults otherwise. */
+  :focus-visible {
+    outline: 2px solid var(--color-leader);
+    outline-offset: 2px;
+    border-radius: var(--radius-ctl);
+  }
+  ::selection { background: color-mix(in srgb, var(--color-leader) 32%, transparent); }
+  input, textarea { caret-color: var(--color-leader); }
+
+  * { scrollbar-width: thin; scrollbar-color: #4a3f34 transparent; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: #3d342b;
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 99px;
+  }
+  ::-webkit-scrollbar-thumb:hover { background: #5a4d3f; background-clip: content-box; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    transition-duration: .01ms !important;
+  }
+}
+
+/* A confirmation should arrive, not blink into being. Motion that answers an
+   action is welcome; this is the only place a dialog uses it. */
+@keyframes dialog-in {
+  from { opacity: 0; transform: translateY(-6px) scale(.98); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes backdrop-in { from { opacity: 0 } to { opacity: 1 } }
+dialog[open] { animation: dialog-in .18s cubic-bezier(.2,.7,.3,1) both; }
+dialog[open]::backdrop { animation: backdrop-in .18s ease-out both; }
+
+/* Things that appear in answer to an action settle in rather than blink. */
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(-3px); }
+  to   { opacity: 1; transform: none; }
+}
+.rise-in { animation: rise-in .16s cubic-bezier(.2,.7,.3,1) both; }
+
+/* The one orchestrated moment: the editor assembling after import. */
+@keyframes gate-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+.gate-in { animation: gate-in .32s cubic-bezier(.2,.7,.3,1) both; }
+
+/* The start screen arrives in three steps — the claim, the gate it is about,
+   then the detail. Capped at 170ms of delay, so it settles rather than
+   performs, and every step starts from a visible default if CSS is all that
+   loads. */
+@keyframes settle {
+  from { opacity: 0; transform: translateY(5px); }
+  to   { opacity: 1; transform: none; }
+}
+.settle { animation: settle .36s cubic-bezier(.16,1,.3,1) both; }
+
+/* Film advancing through the gate, and the only motion on that screen. One
+   pitch is a hole plus its gap, so the strip repeats exactly and the loop has
+   no seam. It runs only while an import is actually working. */
+@keyframes thread {
+  to { transform: translateX(calc(var(--pitch) * -1)); }
+}
+.threading { animation: thread .9s linear infinite; }
+
+/* Landing: the reel of frames runs slowly, half its width per loop, and the
+   list is doubled so the loop has no seam. */
+@keyframes reel {
+  to { transform: translateX(-50%); }
+}
+.reel { animation: reel 60s linear infinite; }
+
+/* Film grain: a fixed, almost invisible noise over the landing page. */
+.grain {
+  opacity: .06;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
