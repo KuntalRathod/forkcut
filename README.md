@@ -10,7 +10,7 @@ Cut by hand - it is built to be quick and obvious. Every change is a version you
 
 </div>
 
-![The Forkcut editor: two clips with waveforms on the timeline, a fade and a punch-in on their own lanes, and the version history alongside](docs/editor.png)
+![The Forkcut editor: an imported screen recording in the preview, its waveform on the timeline, the Ask panel for AI edits, and the version history alongside](docs/forkcut-img.png)
 
 ## What makes it different
 
